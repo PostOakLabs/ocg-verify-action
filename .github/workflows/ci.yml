@@ -28,7 +28,7 @@ jobs:
     needs: fixtures
     steps:
       - uses: actions/checkout@v4
-      - name: Run the Action against its own fixtures (expect 1 fail: tampered.receipt.json)
+      - name: "Run the Action against its own fixtures (expect 1 fail: tampered.receipt.json)"
         id: verify
         uses: ./
         continue-on-error: true
