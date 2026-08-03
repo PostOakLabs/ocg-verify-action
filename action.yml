@@ -1,0 +1,22 @@
+name: 'OCG Receipt Verify'
+description: 'Verify OpenChainGraph (OCG) receipts and disclosure manifests in CI — recomputes execution_hash, checks eddsa-jcs-2022 signatures, and reconstructs RFC 6962 Merkle inclusion proofs. Zero npm dependencies.'
+author: 'Post Oak Labs'
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  glob:
+    description: 'Glob suffix used to find receipt files (default matches any *.receipt.json, walked recursively). Disclosure-manifest and snapshot-batch files are detected by content shape regardless of this glob.'
+    required: false
+    default: '**/*.receipt.json'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify OCG receipts
+      shell: bash
+      env:
+        INPUT_GLOB: ${{ inputs.glob }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: node "$ACTION_PATH/dist/verify.mjs"
