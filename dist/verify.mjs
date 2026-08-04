@@ -14,6 +14,7 @@
 import { webcrypto } from 'node:crypto';
 import { readFileSync, readdirSync, statSync, appendFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { bn254, sha256 as nobleSha256 } from './vendor/_noble-bn254.bundle.mjs';
 
 const crypto = webcrypto;
 
@@ -165,6 +166,136 @@ async function verifyMerkleInclusion(mi, execHashHex) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   §A6 / §18.1 — self-contained BN254 Groth16 reference verifier for
+   receiptFormat:"groth16-bn254", ported verbatim (math untouched,
+   only the cgCanon import point adjusted to this file's own cgCanon)
+   from repo/chaingraph/kernels/_computeproof.mjs. Per CIVERIFY-A6-1:
+   "port it and prove the port matches" — no re-derivation from spec
+   text, no "improved" math. verifySeal() below is byte-for-byte the
+   same algorithm as the kernel's verifySeal(); only the module-load
+   plumbing (import path, no `attachComputeProof`/`verifyBinding`
+   re-export — the Action only needs the seal check) differs.
+══════════════════════════════════════════════════════════════ */
+const { G1, G2, fields, pairingBatch } = bn254;
+const Fp12 = fields.Fp12;
+
+// risc0 default verifier parameters (v3.0.x), as 32-byte digests (Digest::as_bytes order).
+const CONTROL_ROOT_HEX = 'a54dc85ac99f851c92d7c96d7318af41dbe7c0194edfcc37eb4d422a998c1f56';
+const BN254_CONTROL_ID_HEX = 'c07a65145c3cb48b6101962ea607a4dd93c753bb26975cb47feb00d3666e4404';
+
+// risc0 Groth16 verifying key (decimal field coordinates).
+const VK = {
+  alpha: ['20491192805390485299153009773594534940189261866228447918068658471970481763042',
+          '9383485363053290200918347156157836566562967994039712273449902621266178545958'],
+  beta:  ['6375614351688725206403948262868962793625744043794305715222011528459656738731',
+          '4252822878758300859123897981450591353533073413197771768651442665752259397132',
+          '10505242626370262277552901082094356697409835680220590971873171140371331206856',
+          '21847035105528745403288232691147584728191162732299865338377159692350059136679'],
+  gamma: ['10857046999023057135944570762232829481370756359578518086990519993285655852781',
+          '11559732032986387107991004021392285783925812861821192530917403151452391805634',
+          '8495653923123431417604973247489272438418190587263600148770280649306958101930',
+          '4082367875863433681332203403145435568316851327593401208105741076214120093531'],
+  delta: ['12043754404802191763554326994664886008979042643626290185762540825416902247219',
+          '1668323501672964604911431804142266013250380587483576094566949227275849579036',
+          '13740680757317479711909903993315946540841369848973133181051452051592786724563',
+          '7710631539206257456743780535472368339139328733484942210876916214502466455394'],
+  IC: [
+    ['8446592859352799428420270221449902464741693648963397251242447530457567083492','1064796367193003797175961162477173481551615790032213185848276823815288302804'],
+    ['3179835575189816632597428042194253779818690147323192973511715175294048485951','20895841676865356752879376687052266198216014795822152491318012491767775979074'],
+    ['5332723250224941161709478398807683311971555792614491788690328996478511465287','21199491073419440416471372042641226693637837098357067793586556692319371762571'],
+    ['12457994489566736295787256452575216703923664299075106359829199968023158780583','19706766271952591897761291684837117091856807401404423804318744964752784280790'],
+    ['19617808913178163826953378459323299110911217259216006187355745713323154132237','21663537384585072695701846972542344484111393047775983928357046779215877070466'],
+    ['6834578911681792552110317589222010969491336870276623105249474534788043166867','15060583660288623605191393599883223885678013570733629274538391874953353488393'],
+  ],
+};
+
+const cpEnc = (s) => new TextEncoder().encode(s);
+const cpHexToBytes = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
+const cpIntBE = (b) => b.reduce((a, x) => (a << 8n) + BigInt(x), 0n);
+const cpIntLE = (b) => cpIntBE(Uint8Array.from(b).reverse());
+const cpU32le = (n) => Uint8Array.from([n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
+const cpU16le = (n) => Uint8Array.from([n & 0xff, (n >> 8) & 0xff]);
+const cpConcat = (arrs) => { const t = []; for (const a of arrs) for (const b of a) t.push(b); return Uint8Array.from(t); };
+const CP_ZERO32 = new Uint8Array(32);
+
+// risc0 tagged_struct: sha256( sha256(tag) || down... || data(LE u32)... || u16le(down.len) ).
+function taggedStruct(tag, down, data) {
+  return nobleSha256(cpConcat([nobleSha256(cpEnc(tag)), ...down, ...data.map(cpU32le), cpU16le(down.length)]));
+}
+
+// risc0 ReceiptClaim::ok(image_id, journal).digest() — the claim a halted-0, no-assumptions receipt commits.
+function claimDigestOk(imageIdBytes, journalBytes) {
+  const post = taggedStruct('risc0.SystemState', [CP_ZERO32], [0]);
+  const output = taggedStruct('risc0.Output', [nobleSha256(journalBytes), CP_ZERO32], []);
+  return taggedStruct('risc0.ReceiptClaim', [CP_ZERO32, imageIdBytes, post, output], [0, 0]);
+}
+
+// split_digest(d) -> [Fr(low 16B), Fr(high 16B)] (big-endian interpretation).
+function splitDigest(bytes32) {
+  const be = Uint8Array.from(bytes32).reverse();
+  return [cpIntBE(be.slice(16, 32)), cpIntBE(be.slice(0, 16))];
+}
+
+const cpG1 = ([x, y]) => G1.Point.fromAffine({ x: BigInt(x), y: BigInt(y) });
+const cpG2 = ([x0, x1, y0, y1]) => G2.Point.fromAffine({ x: { c0: BigInt(x0), c1: BigInt(x1) }, y: { c0: BigInt(y0), c1: BigInt(y1) } });
+
+function cpNormId(d) { return typeof d === 'string' && d.startsWith('sha256:') ? d : 'sha256:' + d; }
+
+/**
+ * §18.1 — verify a risc0 Groth16-BN254 receipt's cryptographic seal, self-contained and chain-free.
+ * Same contract as the kernel's verifySeal(): true iff the proof verifies for the ReceiptClaim derived
+ * from (imageId, canonical journal); throws (delegated) for receiptFormat:'stark'; false on any
+ * structural problem or invalid proof.
+ */
+function verifySeal(receipt) {
+  const cp = receipt;
+  if (!cp || typeof cp !== 'object') return false;
+  if (cp.receiptFormat === 'stark') {
+    throw new Error('§18.1: stark seal verification is DELEGATED to the vendor verifier (e.g. risc0-verifier); ' +
+      'OCG ships only the self-contained BN254 Groth16 reference verifier for receiptFormat:"groth16-bn254".');
+  }
+  if (cp.receiptFormat !== 'groth16-bn254') return false;
+  if (typeof cp.imageId !== 'string' || typeof cp.seal !== 'string') return false;
+  if (!cp.journal || typeof cp.journal !== 'object') return false;
+
+  const journalBytes = cpEnc(JSON.stringify(cgCanon(cp.journal)));
+  const imageIdBytes = cpHexToBytes(cpNormId(cp.imageId).slice('sha256:'.length));
+  if (imageIdBytes.length !== 32) return false;
+  const claimDigest = claimDigestOk(imageIdBytes, journalBytes);
+  const [a0, a1] = splitDigest(cpHexToBytes(CONTROL_ROOT_HEX));
+  const [c0, c1] = splitDigest(claimDigest);
+  const idBn254 = cpIntLE(cpHexToBytes(BN254_CONTROL_ID_HEX));
+  const pub = [a0, a1, c0, c1, idBn254];
+
+  let seal;
+  try { seal = Uint8Array.from(atob(cp.seal), (ch) => ch.charCodeAt(0)); } catch { return false; }
+  if (seal.length !== 256) return false;
+  let A, B, C, vkx;
+  try {
+    A = G1.Point.fromAffine({ x: cpIntBE(seal.slice(0, 32)), y: cpIntBE(seal.slice(32, 64)) });
+    B = G2.Point.fromAffine({
+      x: { c0: cpIntBE(seal.slice(96, 128)), c1: cpIntBE(seal.slice(64, 96)) },
+      y: { c0: cpIntBE(seal.slice(160, 192)), c1: cpIntBE(seal.slice(128, 160)) },
+    });
+    C = G1.Point.fromAffine({ x: cpIntBE(seal.slice(192, 224)), y: cpIntBE(seal.slice(224, 256)) });
+    A.assertValidity(); B.assertValidity(); C.assertValidity();
+    const IC = VK.IC.map(cpG1);
+    vkx = IC[0];
+    for (let i = 0; i < pub.length; i++) vkx = vkx.add(IC[i + 1].multiply(pub[i]));
+  } catch { return false; }
+
+  try {
+    const gt = pairingBatch([
+      { g1: A, g2: B },
+      { g1: cpG1(VK.alpha).negate(), g2: cpG2(VK.beta) },
+      { g1: vkx.negate(), g2: cpG2(VK.gamma) },
+      { g1: C.negate(), g2: cpG2(VK.delta) },
+    ]);
+    return Fp12.eql(gt, Fp12.ONE);
+  } catch { return false; }
+}
+
+/* ══════════════════════════════════════════════════════════════
    Checkpoint-note parser — ported from tools/568 (adapted from
    WITNESS-VERIFY-1's parseNote). Used only for snapshot-batch mode.
 ══════════════════════════════════════════════════════════════ */
@@ -213,11 +344,20 @@ async function verifyReceipt(artifact, opts) {
     checks.push({ check: 'audit_signature_proof', pass: true, detail: 'no §16 signature attached (OPTIONAL — not a failure by itself)' });
   }
 
-  // §A6 (deliberately deferred for v1): a groth16-bn254 compute_proof is never
-  // false-PASSed or false-FAILed — it's reported as a skipped check.
+  // §A6/§18.1: verify audit_signature.compute_proof when receiptFormat is one this Action
+  // ships a verifier for (groth16-bn254). Any other receiptFormat (e.g. "stark", which §18.1
+  // itself delegates to the vendor verifier) still SKIPS honestly rather than false-PASS/FAIL.
+  let cpRes = null;
   const cp = artifact.audit_signature && artifact.audit_signature.compute_proof;
-  if (cp && artifact.audit_signature.receiptFormat === 'groth16-bn254') {
-    checks.push({ check: 'compute_proof', pass: null, detail: 'compute_proof present, not verified by this Action version' });
+  if (cp && typeof cp === 'object') {
+    if (cp.receiptFormat === 'groth16-bn254') {
+      let sealOk = false, sealErr = null;
+      try { sealOk = verifySeal(cp); } catch (e) { sealErr = e.message; }
+      cpRes = sealOk;
+      checks.push({ check: 'compute_proof', pass: sealOk, detail: sealErr ? ('compute_proof seal verification errored: ' + sealErr) : (sealOk ? 'groth16-bn254 seal verifies against the risc0 verifying key (§18.1)' : 'groth16-bn254 seal does NOT verify — proof is invalid or was tampered with') });
+    } else {
+      checks.push({ check: 'compute_proof', pass: null, detail: 'compute_proof present with receiptFormat "' + cp.receiptFormat + '" — not verified by this Action version (only groth16-bn254 is supported; stark stays vendor-delegated per §18.1)' });
+    }
   }
 
   const anchorBindings = Array.isArray(artifact.anchor_bindings) ? artifact.anchor_bindings : [];
@@ -256,7 +396,7 @@ async function verifyReceipt(artifact, opts) {
   }
   if (staleNotes.length) checks.push({ check: 'anchor_staleness', pass: true, detail: staleNotes.join('; ') + ' (informational — not a FAIL by itself)' });
 
-  const overall = hashMatch && (!sigRes.present || sigRes.allValid) && anchorsOk && (!opts.requireAnchor || anchorBindings.length > 0);
+  const overall = hashMatch && (!sigRes.present || sigRes.allValid) && anchorsOk && (!opts.requireAnchor || anchorBindings.length > 0) && cpRes !== false;
   return { verdict: overall ? 'PASS' : 'FAIL', checks, hash_match: hashMatch, recomputed_hash: recomputed, signature: sigRes, anchors: anchorResults };
 }
 

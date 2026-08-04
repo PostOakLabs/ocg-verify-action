@@ -1,0 +1,136 @@
+{
+  "@context": "https://ainumbers.co/chaingraph/context/v0.3/context.jsonld",
+  "chaingraph_version": "0.4.0",
+  "mandate_type": "compliance_mandate",
+  "tool_id": "art-04-agent-identity-attestation-checker",
+  "tool_version": "1.0.0",
+  "generated_at": "2026-06-27T00:00:00Z",
+  "execution_hash": "e0fcfd4c03f0a19bb7564a51c440bed8c3fa12ce1d0ec9b61dbb5241e8543eee",
+  "chain": {
+    "parent_hashes": [],
+    "parent_tool_ids": [],
+    "chain_depth": 0
+  },
+  "policy_parameters": {
+    "credential": {
+      "credential_type": "AgentCredential",
+      "agent_id": "a1",
+      "issuer": "did:key:zStub",
+      "issued_at": 1,
+      "expires_at": 4102444800,
+      "scopes": [
+        "read:account"
+      ],
+      "signature": "ed25519:zz"
+    },
+    "validate_at_unix": 1750000000
+  },
+  "output_payload": {
+    "overall_status": "warn",
+    "pass": 6,
+    "fail": 0,
+    "warn": 2,
+    "checks": [
+      {
+        "code": "KYA-T01",
+        "status": "pass"
+      },
+      {
+        "code": "KYA-R01",
+        "status": "pass"
+      },
+      {
+        "code": "KYA-R02",
+        "status": "pass"
+      },
+      {
+        "code": "KYA-R03",
+        "status": "pass"
+      },
+      {
+        "code": "KYA-R04",
+        "status": "warn"
+      },
+      {
+        "code": "KYA-R05",
+        "status": "pass"
+      },
+      {
+        "code": "KYA-R06",
+        "status": "pass"
+      },
+      {
+        "code": "KYA-EU1",
+        "status": "warn"
+      }
+    ],
+    "root_agent_id": "a1",
+    "scopes": [
+      "read:account"
+    ]
+  },
+  "compliance_flags": [
+    "KYA_ATTESTED_WITH_WARNINGS"
+  ],
+  "compute_mode": "server",
+  "audit_signature": {
+    "payloadType": "application/vnd.openchain.graph+json;version=0.4",
+    "payload": "",
+    "signatures": [],
+    "compute_proof": {
+      "type": "ZkVmReceipt",
+      "system": "risc0",
+      "receiptFormat": "groth16-bn254",
+      "imageId": "sha256:93c746e79afcf4b27f6d2a6da6cd142a4dd0da31f33d942f92b97344188526c5",
+      "seal": "JprnquQV+W8PZGrVb3psyDFR3XLhdjfIXqv6BPQl4toSEZPGzDAQMW9vktjGPijzYCJ0LVWuD4QDae75YBVN5yiYvlT5xX5ckesO7VwnQJQ3cy/anmRyuV+fRqJANv8+K1LR1CCL+LXDs4OfqZ2lyurNSDIj9hmmOpLSmlSJGSwMuYvNwbuaD922LK8Mf0/KcNL8mKQKpgTJ2YLQ0qhlQC8GKlwA+eHTMZ99YTSTmL/sF5oK+IcawyJYOC7UaI4pIMMFVtoU7i6wui5DA4tUENjZ8ZUG3+IGa91Jq2qjEskn/Vla1uuySzmfJv4LREJAHEFMXLwaXL2lBbxbiV4uGA==",
+      "journal": {
+        "chaingraph_version": "0.4.0",
+        "kernel_digest": "sha256:f4e9e5aed913e80c7f97e3d0d2501e7349c523de4ffd433a1d29081620197b1f",
+        "output": {
+          "overall_status": "warn",
+          "pass": 6,
+          "fail": 0,
+          "warn": 2,
+          "checks": [
+            {
+              "code": "KYA-T01",
+              "status": "pass"
+            },
+            {
+              "code": "KYA-R01",
+              "status": "pass"
+            },
+            {
+              "code": "KYA-R02",
+              "status": "pass"
+            },
+            {
+              "code": "KYA-R03",
+              "status": "pass"
+            },
+            {
+              "code": "KYA-R04",
+              "status": "warn"
+            },
+            {
+              "code": "KYA-R05",
+              "status": "pass"
+            },
+            {
+              "code": "KYA-R06",
+              "status": "pass"
+            },
+            {
+              "code": "KYA-EU1",
+              "status": "warn"
+            }
+          ],
+          "root_agent_id": "a1",
+          "scopes": [
+            "read:account"
+          ]
+        }
+      }
+    }
+  }
+}
