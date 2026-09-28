@@ -53,7 +53,7 @@ This repository's own `.github/workflows/ci.yml` (testing the Action against its
 
 ## Fixtures
 
-`fixtures/` contains three cases reused verbatim from `568-ocg-receipt-verifier`'s own fixture block (a real Ed25519-signed, RFC 6962 Merkle-included round-trip, generated offline via the shared `_hash.mjs`/`_proof.mjs`/`_anchor-testutil.mjs` kernels):
+`fixtures/` contains five cases: three reused verbatim from `568-ocg-receipt-verifier`'s own fixture block (a real Ed25519-signed, RFC 6962 Merkle-included round-trip, generated offline via the shared `_hash.mjs`/`_proof.mjs`/`_anchor-testutil.mjs` kernels), plus two compute-proof fixtures exercising the §18 BN254 path:
 
 - `golden.receipt.json` — verifies PASS.
 - `tampered.receipt.json` — `output_payload.decision` mutated after signing; verifies FAIL with the correct `execution_hash_recompute` detail.
@@ -68,3 +68,7 @@ This repository's own `.github/workflows/ci.yml` (testing the Action against its
 - No PR comments, labels, or any repo-write side effect.
 - No coverage-percentage reporting.
 - No verification of `receiptFormat:"stark"` compute proofs — §18.1 itself delegates stark seal verification to the vendor verifier; this Action reports an honest skip for that format, same as the underlying kernel.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
